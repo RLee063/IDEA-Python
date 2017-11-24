@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
-# A Python implementation of the block cipher IDEA
+# Python implementation of the block cipher IDEA
 
 # Copyright (c) 2015 Bo Zhu https://about.bozhu.me
 # MIT License
+
+import gmpy2
 
 
 def _mul(x, y):
@@ -29,6 +31,7 @@ def _KA_layer(x1, x2, x3, x4, round_keys):
     assert 0 <= x2 <= 0xFFFF
     assert 0 <= x3 <= 0xFFFF
     assert 0 <= x4 <= 0xFFFF
+
     z1, z2, z3, z4 = round_keys[0:4]
     assert 0 <= z1 <= 0xFFFF
     assert 0 <= z2 <= 0xFFFF
@@ -69,34 +72,86 @@ def _MA_layer(y1, y2, y3, y4, round_keys):
 
 class IDEA:
     def __init__(self, key):
-        self._keys = None
-        self.change_key(key)
+        self._expand_key = []
+        self._encrypt_key = None
+        self._decrypt_key = None
+        self.expand_key(key)
+        self.get_encrypt_key()
+        self.get_decrypt_key()
 
-    def change_key(self, key):
+    def expand_key(self, key):
         assert 0 <= key < (1 << 128)
         modulus = 1 << 128
-
-        sub_keys = []
-        for i in range(9 * 6):
-            sub_keys.append((key >> (112 - 16 * (i % 8))) % 0x10000)
+        for i in range(6 * 8 + 4):
+            self._expand_key.append((key >> (112 - 16 * (i % 8))) % 0x10000)
             if i % 8 == 7:
                 key = ((key << 25) | (key >> 103)) % modulus
+        return self._expand_key
 
+    def get_encrypt_key(self):
         keys = []
         for i in range(9):
-            round_keys = sub_keys[6 * i: 6 * (i + 1)]
+            round_keys = self._expand_key[6 * i:6 * (i + 1)]
             keys.append(tuple(round_keys))
-        self._keys = tuple(keys)
+        self._encrypt_key = tuple(keys)
 
-    def encrypt(self, plaintext):
+    def get_decrypt_key(self):
+        keys = [0] * 52
+        for i in range(9):
+            if i == 0:
+                for j in range(6):
+                    if j == 0 or j == 3:
+                        if self._encrypt_key[8 - i][j] == 0:
+                            keys[j] = 0
+                        else:
+                            keys[j] = gmpy2.invert(self._encrypt_key[8 - i][j],
+                                                   65537)
+                    elif j == 1 or j == 2:
+                        keys[j] = (65536 - self._encrypt_key[8 - i][j]) % 65536
+                    else:
+                        keys[j] = self._encrypt_key[7 - i][j]
+            elif i < 8:
+                for j in range(6):
+                    if j == 0 or j == 3:
+                        if self._encrypt_key[8 - i][j] == 0:
+                            keys[i * 6 + j] = 0
+                        else:
+                            keys[i * 6 + j] = gmpy2.invert(
+                                self._encrypt_key[8 - i][j], 65537)
+                    elif j == 1 or j == 2:
+                        keys[i * 6 + 3 -
+                             j] = (65536 - self._encrypt_key[8 - i][j]) % 65536
+                    else:
+                        keys[i * 6 + j] = self._encrypt_key[7 - i][j]
+            else:
+                for j in range(4):
+                    if j == 0 or j == 3:
+                        if self._encrypt_key[8 - i][j] == 0:
+                            keys[i * 6 + j] = 0
+                        else:
+                            keys[i * 6 + j] = gmpy2.invert(
+                                self._encrypt_key[8 - i][j], 65537)
+                    else:
+                        keys[i * 6 +
+                             j] = (65536 - self._encrypt_key[8 - i][j]) % 65536
+        tmp = []
+        for i in range(9):
+            round_keys = keys[6 * i:6 * (i + 1)]
+            tmp.append(tuple(round_keys))
+        self._decrypt_key = tuple(tmp)
+
+    def enc_dec(self, plaintext, flag):
         assert 0 <= plaintext < (1 << 64)
         x1 = (plaintext >> 48) & 0xFFFF
         x2 = (plaintext >> 32) & 0xFFFF
         x3 = (plaintext >> 16) & 0xFFFF
         x4 = plaintext & 0xFFFF
-
+        if flag == 0:
+            key = self._encrypt_key
+        else:
+            key = self._decrypt_key
         for i in range(8):
-            round_keys = self._keys[i]
+            round_keys = key[i]
 
             y1, y2, y3, y4 = _KA_layer(x1, x2, x3, x4, round_keys)
             x1, x2, x3, x4 = _MA_layer(y1, y2, y3, y4, round_keys)
@@ -106,7 +161,7 @@ class IDEA:
         # Note: The words x2 and x3 are not permuted in the last round
         # So here we use x1, x3, x2, x4 as input instead of x1, x2, x3, x4
         # in order to cancel the last permutation x2, x3 = x3, x2
-        y1, y2, y3, y4 = _KA_layer(x1, x3, x2, x4, self._keys[8])
+        y1, y2, y3, y4 = _KA_layer(x1, x3, x2, x4, key[8])
 
         ciphertext = (y1 << 48) | (y2 << 32) | (y3 << 16) | y4
         return ciphertext
@@ -125,10 +180,13 @@ def main():
     print 'plaintext\t', hex(plain)
 
     my_IDEA = IDEA(key)
-    encrypted = my_IDEA.encrypt(plain)
+    encrypted = my_IDEA.enc_dec(plain, 0)
     assert encrypted == cipher
-
     print 'ciphertext\t', hex(cipher)
+
+    decrypted = my_IDEA.enc_dec(encrypted, 1)
+    assert decrypted == plain
+    print 'plaintext\t', hex(decrypted)
 
 
 if __name__ == '__main__':
