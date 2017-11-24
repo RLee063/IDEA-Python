@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Python implementation of the block cipher IDEA
+# A Python implementation of the block cipher IDEA
 
 # Copyright (c) 2015 Bo Zhu https://about.bozhu.me
 # MIT License
@@ -32,7 +32,7 @@ def _KA_layer(x1, x2, x3, x4, round_keys):
     assert 0 <= x3 <= 0xFFFF
     assert 0 <= x4 <= 0xFFFF
 
-    z1, z2, z3, z4 = round_keys[0:4]
+    iz1, z2, z3, z4 = round_keys[0:4]
     assert 0 <= z1 <= 0xFFFF
     assert 0 <= z2 <= 0xFFFF
     assert 0 <= z3 <= 0xFFFF
